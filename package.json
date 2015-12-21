@@ -1,0 +1,25 @@
+{
+  "name": "factory",
+  "description": "Instance factories for Javascript",
+  "version": "1.0.0",
+  "main": "./js/src/index",
+  "dependencies": {
+    "combine": "aleclarson/combine#1.0.0",
+    "define": "aleclarson/define#1.0.0",
+    "emptyFunction": "aleclarson/emptyFunction#1.0.0",
+    "io": "aleclarson/io#1.0.0",
+    "lotus-log": "aleclarson/lotus-log#1.0.0",
+    "lotus-require": "aleclarson/lotus-require#1.0.0",
+    "named-function": "aleclarson/named-function#1.0.3",
+    "reaction": "aleclarson/reaction#0.0.1",
+    "steal": "aleclarson/steal#0.0.1",
+    "type-utils": "aleclarson/type-utils#1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aleclarson/factory.git"
+  },
+  "licenses": [
+    "MIT"
+  ]
+}
