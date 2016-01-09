@@ -1,9 +1,11 @@
-var Factory, Kind, NamedFunction, Reaction, Void, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _initValues, _isEnumerableKey, _mergeOptionDefaults, _toPropConfig, _valueBehaviors, assertType, combine, define, emptyFunction, isKind, isType, log, ref, setKind, setType, steal, sync, validateTypes,
+var Factory, Kind, NamedFunction, Reaction, Void, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _initBoundMethods, _initValues, _isEnumerableKey, _mergeOptionDefaults, _toPropConfig, _valueBehaviors, assertType, combine, define, emptyFunction, isKind, isType, log, ref, reportFailure, setKind, setType, steal, sync, validateTypes,
   slice = [].slice;
 
 ref = require("type-utils"), Void = ref.Void, Kind = ref.Kind, isType = ref.isType, isKind = ref.isKind, setType = ref.setType, setKind = ref.setKind, assertType = ref.assertType, validateTypes = ref.validateTypes;
 
 NamedFunction = require("named-function");
+
+reportFailure = require("report-failure");
 
 emptyFunction = require("emptyFunction");
 
@@ -161,9 +163,14 @@ _initArguments = function(config) {
     return arguments;
   });
   return function(prototype, args) {
+    var error;
     args = initArguments.apply(prototype, args);
     if (!(isKind(args, Object) && isType(args.length, Number))) {
-      throw TypeError("'" + prototype.constructor.name + ".initArguments' must return an Array-like object");
+      error = TypeError("'" + prototype.constructor.name + ".initArguments' must return an Array-like object");
+      reportFailure(error, {
+        prototype: prototype,
+        args: args
+      });
     }
     return args;
   };
@@ -203,7 +210,8 @@ _valueBehaviors = {
 };
 
 _initValues = function(config) {
-  var customValues, initValues, valueBehaviors;
+  var boundMethods, customValues, initValues, valueBehaviors;
+  boundMethods = steal(config, "boundMethods");
   customValues = steal(config, "customValues", {});
   valueBehaviors = sync.map(_valueBehaviors, function(behavior, key) {
     return combine({}, behavior, {
@@ -212,6 +220,12 @@ _initValues = function(config) {
   });
   return initValues = function(instance, args) {
     return define(instance, function() {
+      if (boundMethods != null) {
+        this.options = {
+          frozen: true
+        };
+        this(_initBoundMethods(instance, boundMethods));
+      }
       this.options = {
         configurable: false
       };
@@ -226,13 +240,33 @@ _initValues = function(config) {
           if (isType(values, Array)) {
             values = combine.apply(null, values);
           }
-          assertType(values, [Object]);
+          assertType(values, Object);
           _this.options = behavior.options;
           return _this(sync.map(values, behavior.getConfig));
         };
       })(this));
     });
   };
+};
+
+_initBoundMethods = function(instance, boundMethods) {
+  return sync.reduce(boundMethods, {}, function(methods, key) {
+    var error, keyPath, method;
+    method = instance[key];
+    if (!isKind(method, Function)) {
+      keyPath = instance.constructor.name + "." + key;
+      error = TypeError("'" + keyPath + "' must be a Function!");
+      reportFailure(error, {
+        instance: instance,
+        key: key
+      });
+    }
+    methods[key] = {
+      enumerable: _isEnumerableKey(key),
+      value: method.bind(instance)
+    };
+    return methods;
+  });
 };
 
 //# sourceMappingURL=../../map/src/Factory.map

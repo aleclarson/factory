@@ -5,6 +5,7 @@
   assertType, validateTypes } = require "type-utils"
 
 NamedFunction = require "named-function"
+reportFailure = require "report-failure"
 emptyFunction = require "emptyFunction"
 Reaction = require "reaction"
 { sync } = require "io"
@@ -125,7 +126,8 @@ _initArguments = (config) ->
   return (prototype, args) ->
     args = initArguments.apply prototype, args
     unless isKind(args, Object) and isType(args.length, Number)
-      throw TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
+      error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
+      reportFailure error, { prototype, args }
     args
 
 _isEnumerableKey = (key) ->
@@ -149,17 +151,41 @@ _valueBehaviors =
     getConfig: _toPropConfig
 
 _initValues = (config) ->
+  boundMethods = steal config, "boundMethods"
   customValues = steal config, "customValues", {}
   valueBehaviors = sync.map _valueBehaviors, (behavior, key) ->
     combine {}, behavior, init: steal config, key, emptyFunction
   return initValues = (instance, args) ->
     define instance, ->
+
+      if boundMethods?
+        @options = { frozen: yes }
+        @ _initBoundMethods instance, boundMethods
+
       @options = { configurable: no }
       @ customValues
+
       sync.each valueBehaviors, (behavior) =>
         values = behavior.init.apply instance, args
         return unless values?
         values = combine.apply null, values if isType values, Array
-        assertType values, [ Object ]
+        assertType values, Object
         @options = behavior.options
         @ sync.map values, behavior.getConfig
+
+_initBoundMethods = (instance, boundMethods) ->
+
+  sync.reduce boundMethods, {}, (methods, key) ->
+
+    method = instance[key]
+
+    unless isKind method, Function
+      keyPath = instance.constructor.name + "." + key
+      error = TypeError "'#{keyPath}' must be a Function!"
+      reportFailure error, { instance, key }
+
+    methods[key] =
+      enumerable: _isEnumerableKey key
+      value: method.bind instance
+
+    methods
