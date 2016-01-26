@@ -22,7 +22,7 @@ steal = require("steal");
 log = require("lotus-log");
 
 Factory = NamedFunction("Factory", function(name, config) {
-  var create, factory, getFromCache, init, initArguments, initFactory, initValues, kind, mixins, optionDefaults, optionTypes, statics;
+  var create, factory, getFromCache, init, initArguments, initFactory, initValues, kind, mixins, optionDefaults, optionTypes, singleton, statics;
   assertType(name, String, "name");
   validateTypes(config, _configTypes);
   mixins = steal(config, "mixins", []);
@@ -38,6 +38,7 @@ Factory = NamedFunction("Factory", function(name, config) {
   init = steal(config, "init", emptyFunction);
   initArguments = _initArguments(config);
   initValues = _initValues(config);
+  singleton = steal(config, "singleton");
   factory = NamedFunction(name, function() {
     var args, instance, prevAutoStart;
     args = initArguments(factory.prototype, arguments);
@@ -70,7 +71,7 @@ Factory = NamedFunction("Factory", function(name, config) {
     };
     return this(sync.map(config, _toPropConfig));
   });
-  if (config.singleton === true) {
+  if (singleton === true) {
     return factory();
   }
   combine(statics, {
@@ -143,9 +144,10 @@ _createInstance = function() {
 
 _mergeOptionDefaults = function(options, optionDefaults) {
   var defaultValue, key;
-  if (!isType(options, Object)) {
-    return combine({}, optionDefaults);
+  if (options == null) {
+    options = {};
   }
+  assertType(options, Object);
   for (key in optionDefaults) {
     defaultValue = optionDefaults[key];
     if (isType(defaultValue, Object)) {
@@ -172,7 +174,9 @@ _initArguments = function(config) {
         args: args
       });
     }
-    return args;
+    return sync.map(Object.keys(args), function(key) {
+      return args[key];
+    });
   };
 };
 
@@ -251,7 +255,7 @@ _initValues = function(config) {
 
 _initBoundMethods = function(instance, boundMethods) {
   return sync.reduce(boundMethods, {}, function(methods, key) {
-    var error, keyPath, method;
+    var boundMethod, error, keyPath, method;
     method = instance[key];
     if (!isKind(method, Function)) {
       keyPath = instance.constructor.name + "." + key;
@@ -261,9 +265,13 @@ _initBoundMethods = function(instance, boundMethods) {
         key: key
       });
     }
+    boundMethod = method.bind(instance);
+    boundMethod.toString = function() {
+      return method.toString();
+    };
     methods[key] = {
       enumerable: _isEnumerableKey(key),
-      value: method.bind(instance)
+      value: boundMethod
     };
     return methods;
   });

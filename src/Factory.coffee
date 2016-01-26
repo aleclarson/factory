@@ -33,6 +33,8 @@ Factory = NamedFunction "Factory", (name, config) ->
   initArguments = _initArguments config
   initValues = _initValues config
 
+  singleton = steal config, "singleton"
+
   factory = NamedFunction name, ->
     args = initArguments factory.prototype, arguments
     if optionDefaults?
@@ -61,8 +63,7 @@ Factory = NamedFunction "Factory", (name, config) ->
     @options = frozen: yes
     @ sync.map config, _toPropConfig
 
-  if config.singleton is yes
-    return factory()
+  return factory() if singleton is yes
 
   combine statics,
     optionTypes: optionTypes
@@ -111,9 +112,8 @@ _getDefaultCreate = (config, kind) ->
 _createInstance = (args...) ->
   new (Function::bind.apply this, [null].concat args)()
 
-_mergeOptionDefaults = (options, optionDefaults) ->
-  unless isType options, Object
-    return combine {}, optionDefaults
+_mergeOptionDefaults = (options = {}, optionDefaults) ->
+  assertType options, Object
   for key, defaultValue of optionDefaults
     if isType defaultValue, Object
       options[key] = _mergeOptionDefaults options[key], defaultValue
@@ -128,7 +128,7 @@ _initArguments = (config) ->
     unless isKind(args, Object) and isType(args.length, Number)
       error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
       reportFailure error, { prototype, args }
-    args
+    sync.map Object.keys(args), (key) -> args[key]
 
 _isEnumerableKey = (key) ->
   key[0] isnt "_"
@@ -184,8 +184,11 @@ _initBoundMethods = (instance, boundMethods) ->
       error = TypeError "'#{keyPath}' must be a Function!"
       reportFailure error, { instance, key }
 
+    boundMethod = method.bind instance
+    boundMethod.toString = -> method.toString()
+
     methods[key] =
       enumerable: _isEnumerableKey key
-      value: method.bind instance
+      value: boundMethod
 
     methods

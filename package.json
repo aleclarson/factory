@@ -12,6 +12,7 @@
     "lotus-require": "aleclarson/lotus-require#1.0.0",
     "named-function": "aleclarson/named-function#1.0.3",
     "reaction": "aleclarson/reaction#0.0.1",
+    "report-failure": "aleclarson/report-failure#1.0.0",
     "steal": "aleclarson/steal#0.0.1",
     "type-utils": "aleclarson/type-utils#1.0.0"
   },
