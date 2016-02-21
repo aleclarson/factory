@@ -1,5 +1,9 @@
 
-# factory v1.0.0 [![experimental](http://badges.github.io/stability-badges/dist/experimental.svg)](http://github.com/badges/stability-badges)
+# factory v1.0.0 [![stable](http://badges.github.io/stability-badges/dist/stable.svg)](http://github.com/badges/stability-badges)
+
+The `Factory` constructor is used to define classes.
+
+## install
 
 ```sh
 npm install aleclarson/factory#1.0.0

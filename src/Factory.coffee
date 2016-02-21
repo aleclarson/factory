@@ -1,14 +1,21 @@
 
-{ Void, Kind,
-  isType, isKind,
-  setType, setKind,
-  assertType, validateTypes } = require "type-utils"
+{ Void
+  Kind
+  isType
+  isKind
+  setType
+  setKind
+  assertType
+  validateTypes } = require "type-utils"
 
+{ sync } = require "io"
+
+parseErrorStack = require "parseErrorStack"
 NamedFunction = require "named-function"
 reportFailure = require "report-failure"
 emptyFunction = require "emptyFunction"
+ValueDefiner = require "ValueDefiner"
 Reaction = require "reaction"
-{ sync } = require "io"
 combine = require "combine"
 define = require "define"
 steal = require "steal"
@@ -20,18 +27,23 @@ Factory = NamedFunction "Factory", (name, config) ->
   validateTypes config, _configTypes
 
   mixins = steal config, "mixins", []
-  sync.each mixins, (mixin) -> mixin config
+  sync.each mixins, (mixin) ->
+    assertType mixin, Function, { name, mixin, mixins }
+    mixin config
 
   statics = steal config, "statics", {}
   optionTypes = steal config, "optionTypes"
   optionDefaults = steal config, "optionDefaults"
 
   kind = steal config, "kind", Object
-  create = _getDefaultCreate config, kind
+
   getFromCache = steal config, "getFromCache", emptyFunction
+
+  create = _getDefaultCreate config, kind
+
   init = steal config, "init", emptyFunction
   initArguments = _initArguments config
-  initValues = _initValues config
+  initValues = ValueDefiner config, ValueDefiner.types
 
   singleton = steal config, "singleton"
 
@@ -41,15 +53,21 @@ Factory = NamedFunction "Factory", (name, config) ->
       args[0] = _mergeOptionDefaults args[0], optionDefaults
     # TODO: Disable validation when not in __DEV__ mode
     if optionTypes? and isType args[0], Object
-      validateTypes args[0], optionTypes
+      try validateTypes args[0], optionTypes, "#{name}.options"
+      catch error
+        reportFailure error, { instance, args, factory }
     instance = getFromCache.apply factory, args
     return instance if instance isnt undefined
-    instance = create.apply factory, args
+    try instance = create.apply factory, args
+    catch error then reportFailure error, { factory, method: "create" }
     setType instance, factory
     prevAutoStart = Reaction.autoStart
     Reaction.autoStart = yes
-    initValues instance, args
-    init.apply instance, args
+    try
+      initValues instance, args
+      init.apply instance, args
+    catch error
+      reportFailure error, { instance, args, factory }
     Reaction.autoStart = prevAutoStart
     instance
 
@@ -61,7 +79,8 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   define factory.prototype, ->
     @options = frozen: yes
-    @ sync.map config, _toPropConfig
+    @ sync.map config, (value, key) ->
+      return { value, enumerable: key[0] isnt "_" }
 
   return factory() if singleton is yes
 
@@ -72,7 +91,8 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   define factory, ->
     @options = frozen: yes
-    @ sync.map statics, _toPropConfig
+    @ sync.map statics, (value, key) ->
+      return { value, enumerable: key[0] isnt "_" }
 
 module.exports = setKind Factory, Function
 
@@ -101,9 +121,7 @@ _getDefaultCreate = (config, kind) ->
   if create?
     return create
   if func?
-    return ->
-      instance = ->
-        func.apply instance, arguments
+    return -> instance = -> func.apply instance, arguments
   switch kind
     when Object then -> {}
     when null then -> Object.create null
@@ -129,66 +147,3 @@ _initArguments = (config) ->
       error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
       reportFailure error, { prototype, args }
     sync.map Object.keys(args), (key) -> args[key]
-
-_isEnumerableKey = (key) ->
-  key[0] isnt "_"
-
-_toPropConfig = (value, key) ->
-  { value, enumerable: _isEnumerableKey key }
-
-_valueBehaviors =
-
-  initValues:
-    options: { configurable: no }
-    getConfig: _toPropConfig
-
-  initFrozenValues:
-    options: { frozen: yes }
-    getConfig: _toPropConfig
-
-  initReactiveValues:
-    options: { reactive: yes, configurable: no }
-    getConfig: _toPropConfig
-
-_initValues = (config) ->
-  boundMethods = steal config, "boundMethods"
-  customValues = steal config, "customValues", {}
-  valueBehaviors = sync.map _valueBehaviors, (behavior, key) ->
-    combine {}, behavior, init: steal config, key, emptyFunction
-  return initValues = (instance, args) ->
-    define instance, ->
-
-      if boundMethods?
-        @options = { frozen: yes }
-        @ _initBoundMethods instance, boundMethods
-
-      @options = { configurable: no }
-      @ customValues
-
-      sync.each valueBehaviors, (behavior) =>
-        values = behavior.init.apply instance, args
-        return unless values?
-        values = combine.apply null, values if isType values, Array
-        assertType values, Object
-        @options = behavior.options
-        @ sync.map values, behavior.getConfig
-
-_initBoundMethods = (instance, boundMethods) ->
-
-  sync.reduce boundMethods, {}, (methods, key) ->
-
-    method = instance[key]
-
-    unless isKind method, Function
-      keyPath = instance.constructor.name + "." + key
-      error = TypeError "'#{keyPath}' must be a Function!"
-      reportFailure error, { instance, key }
-
-    boundMethod = method.bind instance
-    boundMethod.toString = -> method.toString()
-
-    methods[key] =
-      enumerable: _isEnumerableKey key
-      value: boundMethod
-
-    methods

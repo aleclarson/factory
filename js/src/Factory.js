@@ -1,7 +1,11 @@
-var Factory, Kind, NamedFunction, Reaction, Void, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _initBoundMethods, _initValues, _isEnumerableKey, _mergeOptionDefaults, _toPropConfig, _valueBehaviors, assertType, combine, define, emptyFunction, isKind, isType, log, ref, reportFailure, setKind, setType, steal, sync, validateTypes,
+var Factory, Kind, NamedFunction, Reaction, ValueDefiner, Void, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _mergeOptionDefaults, assertType, combine, define, emptyFunction, isKind, isType, log, parseErrorStack, ref, reportFailure, setKind, setType, steal, sync, validateTypes,
   slice = [].slice;
 
 ref = require("type-utils"), Void = ref.Void, Kind = ref.Kind, isType = ref.isType, isKind = ref.isKind, setType = ref.setType, setKind = ref.setKind, assertType = ref.assertType, validateTypes = ref.validateTypes;
+
+sync = require("io").sync;
+
+parseErrorStack = require("parseErrorStack");
 
 NamedFunction = require("named-function");
 
@@ -9,9 +13,9 @@ reportFailure = require("report-failure");
 
 emptyFunction = require("emptyFunction");
 
-Reaction = require("reaction");
+ValueDefiner = require("ValueDefiner");
 
-sync = require("io").sync;
+Reaction = require("reaction");
 
 combine = require("combine");
 
@@ -27,37 +31,68 @@ Factory = NamedFunction("Factory", function(name, config) {
   validateTypes(config, _configTypes);
   mixins = steal(config, "mixins", []);
   sync.each(mixins, function(mixin) {
+    assertType(mixin, Function, {
+      name: name,
+      mixin: mixin,
+      mixins: mixins
+    });
     return mixin(config);
   });
   statics = steal(config, "statics", {});
   optionTypes = steal(config, "optionTypes");
   optionDefaults = steal(config, "optionDefaults");
   kind = steal(config, "kind", Object);
-  create = _getDefaultCreate(config, kind);
   getFromCache = steal(config, "getFromCache", emptyFunction);
+  create = _getDefaultCreate(config, kind);
   init = steal(config, "init", emptyFunction);
   initArguments = _initArguments(config);
-  initValues = _initValues(config);
+  initValues = ValueDefiner(config, ValueDefiner.types);
   singleton = steal(config, "singleton");
   factory = NamedFunction(name, function() {
-    var args, instance, prevAutoStart;
+    var args, error, instance, prevAutoStart;
     args = initArguments(factory.prototype, arguments);
     if (optionDefaults != null) {
       args[0] = _mergeOptionDefaults(args[0], optionDefaults);
     }
     if ((optionTypes != null) && isType(args[0], Object)) {
-      validateTypes(args[0], optionTypes);
+      try {
+        validateTypes(args[0], optionTypes, name + ".options");
+      } catch (_error) {
+        error = _error;
+        reportFailure(error, {
+          instance: instance,
+          args: args,
+          factory: factory
+        });
+      }
     }
     instance = getFromCache.apply(factory, args);
     if (instance !== void 0) {
       return instance;
     }
-    instance = create.apply(factory, args);
+    try {
+      instance = create.apply(factory, args);
+    } catch (_error) {
+      error = _error;
+      reportFailure(error, {
+        factory: factory,
+        method: "create"
+      });
+    }
     setType(instance, factory);
     prevAutoStart = Reaction.autoStart;
     Reaction.autoStart = true;
-    initValues(instance, args);
-    init.apply(instance, args);
+    try {
+      initValues(instance, args);
+      init.apply(instance, args);
+    } catch (_error) {
+      error = _error;
+      reportFailure(error, {
+        instance: instance,
+        args: args,
+        factory: factory
+      });
+    }
     Reaction.autoStart = prevAutoStart;
     return instance;
   });
@@ -69,7 +104,12 @@ Factory = NamedFunction("Factory", function(name, config) {
     this.options = {
       frozen: true
     };
-    return this(sync.map(config, _toPropConfig));
+    return this(sync.map(config, function(value, key) {
+      return {
+        value: value,
+        enumerable: key[0] !== "_"
+      };
+    }));
   });
   if (singleton === true) {
     return factory();
@@ -83,7 +123,12 @@ Factory = NamedFunction("Factory", function(name, config) {
     this.options = {
       frozen: true
     };
-    return this(sync.map(statics, _toPropConfig));
+    return this(sync.map(statics, function(value, key) {
+      return {
+        value: value,
+        enumerable: key[0] !== "_"
+      };
+    }));
   });
 });
 
@@ -178,103 +223,6 @@ _initArguments = function(config) {
       return args[key];
     });
   };
-};
-
-_isEnumerableKey = function(key) {
-  return key[0] !== "_";
-};
-
-_toPropConfig = function(value, key) {
-  return {
-    value: value,
-    enumerable: _isEnumerableKey(key)
-  };
-};
-
-_valueBehaviors = {
-  initValues: {
-    options: {
-      configurable: false
-    },
-    getConfig: _toPropConfig
-  },
-  initFrozenValues: {
-    options: {
-      frozen: true
-    },
-    getConfig: _toPropConfig
-  },
-  initReactiveValues: {
-    options: {
-      reactive: true,
-      configurable: false
-    },
-    getConfig: _toPropConfig
-  }
-};
-
-_initValues = function(config) {
-  var boundMethods, customValues, initValues, valueBehaviors;
-  boundMethods = steal(config, "boundMethods");
-  customValues = steal(config, "customValues", {});
-  valueBehaviors = sync.map(_valueBehaviors, function(behavior, key) {
-    return combine({}, behavior, {
-      init: steal(config, key, emptyFunction)
-    });
-  });
-  return initValues = function(instance, args) {
-    return define(instance, function() {
-      if (boundMethods != null) {
-        this.options = {
-          frozen: true
-        };
-        this(_initBoundMethods(instance, boundMethods));
-      }
-      this.options = {
-        configurable: false
-      };
-      this(customValues);
-      return sync.each(valueBehaviors, (function(_this) {
-        return function(behavior) {
-          var values;
-          values = behavior.init.apply(instance, args);
-          if (values == null) {
-            return;
-          }
-          if (isType(values, Array)) {
-            values = combine.apply(null, values);
-          }
-          assertType(values, Object);
-          _this.options = behavior.options;
-          return _this(sync.map(values, behavior.getConfig));
-        };
-      })(this));
-    });
-  };
-};
-
-_initBoundMethods = function(instance, boundMethods) {
-  return sync.reduce(boundMethods, {}, function(methods, key) {
-    var boundMethod, error, keyPath, method;
-    method = instance[key];
-    if (!isKind(method, Function)) {
-      keyPath = instance.constructor.name + "." + key;
-      error = TypeError("'" + keyPath + "' must be a Function!");
-      reportFailure(error, {
-        instance: instance,
-        key: key
-      });
-    }
-    boundMethod = method.bind(instance);
-    boundMethod.toString = function() {
-      return method.toString();
-    };
-    methods[key] = {
-      enumerable: _isEnumerableKey(key),
-      value: boundMethod
-    };
-    return methods;
-  });
 };
 
 //# sourceMappingURL=../../map/src/Factory.map
