@@ -1,21 +1,21 @@
-var Factory, Kind, NamedFunction, Reaction, ValueDefiner, Void, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _mergeOptionDefaults, assertType, combine, define, emptyFunction, isKind, isType, log, parseErrorStack, ref, reportFailure, setKind, setType, steal, sync, validateTypes,
+var BoundMethodCreator, CustomValueCreator, Factory, FrozenValueCreator, Kind, LazyVar, NamedFunction, Reaction, ReactiveValueCreator, ValueDefiner, Void, WritableValueCreator, _configTypes, _createInstance, _getDefaultCreate, _initArguments, _mergeOptionDefaults, _validateOptionTypes, _valueCreatorTypes, assert, assertType, combine, define, emptyFunction, highestLevel, isKind, isType, ref, ref1, registeredNames, setKind, setType, steal, sync, throwFailure, validateTypes,
   slice = [].slice;
 
-ref = require("type-utils"), Void = ref.Void, Kind = ref.Kind, isType = ref.isType, isKind = ref.isKind, setType = ref.setType, setKind = ref.setKind, assertType = ref.assertType, validateTypes = ref.validateTypes;
+ref = require("type-utils"), Void = ref.Void, Kind = ref.Kind, isType = ref.isType, isKind = ref.isKind, setType = ref.setType, setKind = ref.setKind, assert = ref.assert, assertType = ref.assertType, validateTypes = ref.validateTypes;
+
+ref1 = require("ValueDefiner"), ValueDefiner = ref1.ValueDefiner, BoundMethodCreator = ref1.BoundMethodCreator, CustomValueCreator = ref1.CustomValueCreator, FrozenValueCreator = ref1.FrozenValueCreator, WritableValueCreator = ref1.WritableValueCreator, ReactiveValueCreator = ref1.ReactiveValueCreator;
+
+throwFailure = require("failure").throwFailure;
 
 sync = require("io").sync;
 
-parseErrorStack = require("parseErrorStack");
-
 NamedFunction = require("named-function");
-
-reportFailure = require("report-failure");
 
 emptyFunction = require("emptyFunction");
 
-ValueDefiner = require("ValueDefiner");
-
 Reaction = require("reaction");
+
+LazyVar = require("lazy-var");
 
 combine = require("combine");
 
@@ -23,10 +23,12 @@ define = require("define");
 
 steal = require("steal");
 
-log = require("lotus-log");
+highestLevel = null;
 
-Factory = NamedFunction("Factory", function(name, config) {
-  var create, factory, getFromCache, init, initArguments, initFactory, initValues, kind, mixins, optionDefaults, optionTypes, singleton, statics;
+registeredNames = Object.create(null);
+
+module.exports = Factory = NamedFunction("Factory", function(name, config) {
+  var create, didCreate, didInit, factory, getFromCache, init, initArguments, initFactory, initValues, instanceCount, kind, mixins, optionDefaults, optionTypes, optionsIndex, singleton, statics, willCreate;
   assertType(name, String, "name");
   validateTypes(config, _configTypes);
   mixins = steal(config, "mixins", []);
@@ -36,50 +38,77 @@ Factory = NamedFunction("Factory", function(name, config) {
       mixin: mixin,
       mixins: mixins
     });
-    return mixin(config);
+    return mixin(name, config);
   });
   statics = steal(config, "statics", {});
+  initArguments = _initArguments(config);
   optionTypes = steal(config, "optionTypes");
   optionDefaults = steal(config, "optionDefaults");
+  optionsIndex = steal(config, "optionsIndex", 0);
+  singleton = steal(config, "singleton");
   kind = steal(config, "kind", Object);
   getFromCache = steal(config, "getFromCache", emptyFunction);
+  willCreate = steal(config, "willCreate", emptyFunction);
   create = _getDefaultCreate(config, kind);
+  didCreate = steal(config, "didCreate", emptyFunction);
+  didInit = steal(config, "didInit", emptyFunction);
   init = steal(config, "init", emptyFunction);
-  initArguments = _initArguments(config);
-  initValues = ValueDefiner(config, ValueDefiner.types);
-  singleton = steal(config, "singleton");
+  initValues = ValueDefiner(config, {
+    valueCreatorTypes: combine({}, _valueCreatorTypes, steal(config, "valueCreatorTypes")),
+    defineValues: steal(config, "defineValues"),
+    didDefineValues: steal(config, "didDefineValues")
+  });
+  assert(registeredNames[name] == null, {
+    name: name,
+    reason: "Factory names must be unique!"
+  });
+  registeredNames[name] = true;
+  instanceCount = 0;
   factory = NamedFunction(name, function() {
-    var args, error, instance, prevAutoStart;
+    var args, error, higherLevel, instance, prevAutoStart;
     args = initArguments(factory.prototype, arguments);
     if (optionDefaults != null) {
-      args[0] = _mergeOptionDefaults(args[0], optionDefaults);
+      args[optionsIndex] = _mergeOptionDefaults(args[optionsIndex], optionDefaults);
     }
-    if ((optionTypes != null) && isType(args[0], Object)) {
-      try {
-        validateTypes(args[0], optionTypes, name + ".options");
-      } catch (_error) {
-        error = _error;
-        reportFailure(error, {
-          instance: instance,
-          args: args,
-          factory: factory
-        });
-      }
+    if (optionTypes != null) {
+      _validateOptionTypes(args[optionsIndex], optionTypes, factory);
     }
     instance = getFromCache.apply(factory, args);
     if (instance !== void 0) {
       return instance;
     }
+    higherLevel = highestLevel;
+    if (highestLevel == null) {
+      highestLevel = name + "_" + instanceCount++;
+    }
+    if (higherLevel == null) {
+      willCreate.call(null, highestLevel, args);
+    }
     try {
       instance = create.apply(factory, args);
     } catch (_error) {
       error = _error;
-      reportFailure(error, {
+      throwFailure(error, {
+        method: "create",
         factory: factory,
-        method: "create"
+        args: args
       });
     }
     setType(instance, factory);
+    if (highestLevel != null) {
+      define(instance, "__id", {
+        value: highestLevel,
+        enumerable: false,
+        frozen: true
+      });
+      highestLevel = null;
+    }
+    if (higherLevel == null) {
+      assertType(instance, factory, {
+        key: "instance.constructor"
+      });
+      didCreate.apply(instance, args);
+    }
     prevAutoStart = Reaction.autoStart;
     Reaction.autoStart = true;
     try {
@@ -87,11 +116,14 @@ Factory = NamedFunction("Factory", function(name, config) {
       init.apply(instance, args);
     } catch (_error) {
       error = _error;
-      reportFailure(error, {
+      throwFailure(error, {
         instance: instance,
-        args: args,
-        factory: factory
+        factory: factory,
+        args: args
       });
+    }
+    if (higherLevel == null) {
+      didInit.apply(instance, args);
     }
     Reaction.autoStart = prevAutoStart;
     return instance;
@@ -124,15 +156,29 @@ Factory = NamedFunction("Factory", function(name, config) {
       frozen: true
     };
     return this(sync.map(statics, function(value, key) {
-      return {
-        value: value,
-        enumerable: key[0] !== "_"
-      };
+      var enumerable;
+      enumerable = key[0] !== "_";
+      if (isType(value, LazyVar)) {
+        return {
+          get: function() {
+            return value.get();
+          },
+          set: function() {
+            return value.set(arguments[0]);
+          },
+          enumerable: enumerable
+        };
+      } else {
+        return {
+          value: value,
+          enumerable: enumerable
+        };
+      }
     }));
   });
 });
 
-module.exports = setKind(Factory, Function);
+setKind(Factory, Function);
 
 _configTypes = {
   mixins: [Array, Void],
@@ -147,7 +193,16 @@ _configTypes = {
   initValues: [Function, Void],
   initFrozenValues: [Function, Void],
   initReactiveValues: [Function, Void],
+  onValuesCreated: [Function, Void],
   init: [Function, Void]
+};
+
+_valueCreatorTypes = {
+  boundMethods: BoundMethodCreator(),
+  customValues: CustomValueCreator(),
+  initFrozenValues: FrozenValueCreator(),
+  initValues: WritableValueCreator(),
+  initReactiveValues: ReactiveValueCreator()
 };
 
 _getDefaultCreate = function(config, kind) {
@@ -187,6 +242,21 @@ _createInstance = function() {
   return new (Function.prototype.bind.apply(this, [null].concat(args)))();
 };
 
+_validateOptionTypes = function(options, optionTypes, factory) {
+  var error;
+  if (!isType(options, Object)) {
+    return;
+  }
+  try {
+    return validateTypes(options, optionTypes);
+  } catch (_error) {
+    error = _error;
+    return throwFailure(error, {
+      factory: factory
+    });
+  }
+};
+
 _mergeOptionDefaults = function(options, optionDefaults) {
   var defaultValue, key;
   if (options == null) {
@@ -214,7 +284,7 @@ _initArguments = function(config) {
     args = initArguments.apply(prototype, args);
     if (!(isKind(args, Object) && isType(args.length, Number))) {
       error = TypeError("'" + prototype.constructor.name + ".initArguments' must return an Array-like object");
-      reportFailure(error, {
+      throwFailure(error, {
         prototype: prototype,
         args: args
       });
