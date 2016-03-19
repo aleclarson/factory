@@ -1,5 +1,6 @@
 
 { Void
+  Null
   Kind
   isType
   isKind
@@ -18,40 +19,33 @@
 
 { throwFailure } = require "failure"
 
-{ sync } = require "io"
-
 NamedFunction = require "named-function"
 emptyFunction = require "emptyFunction"
 Reaction = require "reaction"
-LazyVar = require "lazy-var"
 combine = require "combine"
 define = require "define"
 steal = require "steal"
+isDev = require "isDev"
+sync = require "sync"
 
 # The `__id` of the highest level factory in the creation chain.
 highestLevel = null
 
 registeredNames = Object.create null
 
-module.exports =
 Factory = NamedFunction "Factory", (name, config) ->
 
   assertType name, String, "name"
-  validateTypes config, _configTypes
+  validateTypes config, Factory.configTypes
 
   mixins = steal config, "mixins", []
   sync.each mixins, (mixin) ->
     assertType mixin, Function, { name, mixin, mixins }
-    mixin name, config
-
-  # disableStateHistory = steal config, "disableStateHistory", no
-  # unless disableStateHistory
-  #   StateHistory = require "state-history"
-  #   StateHistory.mixin name, config
+    mixin config
 
   statics = steal config, "statics", {}
 
-  initArguments = _initArguments config
+  initArguments = Factory.initArguments config
 
   optionTypes = steal config, "optionTypes"
   optionDefaults = steal config, "optionDefaults"
@@ -62,13 +56,13 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   getFromCache = steal config, "getFromCache", emptyFunction
   willCreate = steal config, "willCreate", emptyFunction
-  create = _getDefaultCreate config, kind
+  create = Factory.getDefaultCreate config, kind
   didCreate = steal config, "didCreate", emptyFunction
 
   didInit = steal config, "didInit", emptyFunction
   init = steal config, "init", emptyFunction
   initValues = ValueDefiner config,
-    valueCreatorTypes: combine {}, _valueCreatorTypes, (steal config, "valueCreatorTypes")
+    valueCreatorTypes: combine {}, Factory.valueCreators, (steal config, "valueCreators")
     defineValues: steal config, "defineValues"
     didDefineValues: steal config, "didDefineValues"
 
@@ -79,11 +73,10 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   factory = NamedFunction name, ->
 
-    args = initArguments factory.prototype, arguments
-    args[optionsIndex] = _mergeOptionDefaults args[optionsIndex], optionDefaults if optionDefaults?
-    _validateOptionTypes args[optionsIndex], optionTypes, factory if optionTypes?
+    args = initArguments arguments
+    args[optionsIndex] = Factory.mergeOptionDefaults args[optionsIndex], optionDefaults if optionDefaults?
+    Factory.validateOptionTypes args[optionsIndex], optionTypes, factory if optionTypes?
 
-    # See if an instance is already cached.
     instance = getFromCache.apply factory, args
     return instance if instance isnt undefined
 
@@ -92,11 +85,6 @@ Factory = NamedFunction "Factory", (name, config) ->
 
     unless higherLevel?
       willCreate.call null, highestLevel, args
-
-      # unless disableStateHistory
-      #   initialActions = []
-      #   historyListener = (action) -> initialActions.push action
-      #   StateHistory.addListener historyListener
 
     try instance = create.apply factory, args
     catch error then throwFailure error, { method: "create", factory, args }
@@ -112,18 +100,20 @@ Factory = NamedFunction "Factory", (name, config) ->
 
     prevAutoStart = Reaction.autoStart
     Reaction.autoStart = yes
-    try
+
+    if isDev
+      try
+        initValues instance, args
+        init.apply instance, args
+      catch error
+        throwFailure error, { instance, factory, args }
+
+    else
       initValues instance, args
       init.apply instance, args
-    catch error
-      throwFailure error, { instance, factory, args }
 
     unless higherLevel?
       didInit.apply instance, args
-
-      # unless disableStateHistory
-      #   define instance, "__initialActions", { value: initialActions, enumerable: no }
-      #   StateHistory.removeListener historyListener
 
     Reaction.autoStart = prevAutoStart
     return instance
@@ -135,99 +125,107 @@ Factory = NamedFunction "Factory", (name, config) ->
   initFactory.call factory
 
   define factory.prototype, ->
-    @options = frozen: yes
+    @options = frozen: no
     @ sync.map config, (value, key) ->
       return { value, enumerable: key[0] isnt "_" }
 
   if singleton is yes
     return factory()
 
-  combine statics,
-    optionTypes: optionTypes
-    optionDefaults: optionDefaults
-    Kind: Kind factory
+  statics.optionTypes = value: optionTypes
+  statics.optionDefaults = value: optionDefaults
+  statics.Kind = lazy: -> Kind factory
 
-  define factory, ->
-    @options = frozen: yes
-    @ sync.map statics, (value, key) ->
-      enumerable = key[0] isnt "_"
-      if isType value, LazyVar then {
-        get: -> value.get()
-        set: -> value.set arguments[0]
-        enumerable
-      } else {
-        value
-        enumerable
-      }
+  statics = sync.map statics, (value, key) ->
+    enumerable = key[0] isnt "_"
+    if isType value, Object
+      value.frozen ?= yes
+      value.enumerable ?= enumerable
+      return value
+    return {
+      value
+      frozen: yes
+      enumerable
+    }
 
-setKind Factory, Function
+  define factory, statics
 
-#
-# Internal
-#
+module.exports = setKind Factory, Function
 
-_configTypes = {
-  mixins: [ Array, Void ]
-  statics: [ Object, Void ]
-  singleton: [ Boolean, Void ]
-  initFactory: [ Function, Void ]
-  initArguments: [ Function, Void ]
-  optionTypes: [ Object, Void ]
-  optionDefaults: [ Object, Void ]
-  getFromCache: [ Function, Void ]
-  customValues: [ Object, Void ]
-  initValues: [ Function, Void ]
-  initFrozenValues: [ Function, Void ]
-  initReactiveValues: [ Function, Void ]
-  onValuesCreated: [ Function, Void ]
-  init: [ Function, Void ]
-}
+define Factory,
 
-_valueCreatorTypes = {
-  boundMethods: BoundMethodCreator()
-  customValues: CustomValueCreator()
-  initFrozenValues: FrozenValueCreator()
-  initValues: WritableValueCreator()
-  initReactiveValues: ReactiveValueCreator()
-}
+  configTypes: value: {
+    mixins: [ Array, Void ]
+    kind: [ Factory, Null, Void ]
+    getFromCache: [ Function, Void ]
+    create: [ Function, Void ]
+    func: [ Function, Void ]
+    statics: [ Object, Void ]
+    singleton: [ Boolean, Void ]
+    initFactory: [ Function, Void ]
+    initArguments: [ Function, Void ]
+    optionTypes: [ Object, Void ]
+    optionDefaults: [ Object, Void ]
+    optionsIndex: [ Number, Void ]
+    getFromCache: [ Function, Void ]
+    customValues: [ Object, Void ]
+    initValues: [ Function, Void ]
+    initFrozenValues: [ Function, Void ]
+    initReactiveValues: [ Function, Void ]
+    init: [ Function, Void ]
+    willCreate: [ Function, Void ]
+    didCreate: [ Function, Void ]
+    didInit: [ Function, Void ]
+    valueCreators: [ Array, Void ]
+    defineValues: [ Function, Void ]
+    didDefineValues: [ Function, Void ]
+  }
 
-_getDefaultCreate = (config, kind) ->
-  create = steal config, "create"
-  func = steal config, "func"
-  if create?
-    return create
-  if func?
-    return ->
-      instance = ->
-        func.apply instance, arguments
-  switch kind
-    when Object then -> {}
-    when null then -> Object.create null
-    else -> _createInstance.apply kind, arguments
+  valueCreators: value: {
+    boundMethods: BoundMethodCreator()
+    customValues: CustomValueCreator()
+    initFrozenValues: FrozenValueCreator()
+    initValues: WritableValueCreator()
+    initReactiveValues: ReactiveValueCreator()
+  }
 
-_createInstance = (args...) ->
-  new (Function::bind.apply this, [null].concat args)()
+  createInstance: (args...) ->
+    new (Function::bind.apply this, [null].concat args)()
 
-_validateOptionTypes = (options, optionTypes, factory) ->
-  # if __DEV__
-  return unless isType options, Object
-  try validateTypes options, optionTypes
-  catch error then throwFailure error, { factory }
+  getDefaultCreate: (config, kind) ->
+    create = steal config, "create"
+    func = steal config, "func"
+    if create?
+      return create
+    if func?
+      return ->
+        instance = ->
+          func.apply instance, arguments
+    switch kind
+      when Object then -> {}
+      when null then -> Object.create null
+      else -> Factory.createInstance.apply kind, arguments
 
-_mergeOptionDefaults = (options = {}, optionDefaults) ->
-  assertType options, Object
-  for key, defaultValue of optionDefaults
-    if isType defaultValue, Object
-      options[key] = _mergeOptionDefaults options[key], defaultValue
-    else if options[key] is undefined
-      options[key] = defaultValue
-  options
+  initArguments: (config) ->
+    initArguments = steal config, "initArguments", -> arguments
+    return (args) ->
+      args = initArguments.apply null, args
+      unless isKind(args, Object) and isType(args.length, Number)
+        error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
+        throwFailure error, { prototype, args }
+      sync.map Object.keys(args), (key) -> args[key]
 
-_initArguments = (config) ->
-  initArguments = steal config, "initArguments", -> arguments
-  return (prototype, args) ->
-    args = initArguments.apply prototype, args
-    unless isKind(args, Object) and isType(args.length, Number)
-      error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
-      throwFailure error, { prototype, args }
-    sync.map Object.keys(args), (key) -> args[key]
+  validateOptionTypes: (options, optionTypes, factory) ->
+    return if isDev
+    return unless isType options, Object
+    try validateTypes options, optionTypes
+    catch error then throwFailure error, { factory }
+
+  mergeOptionDefaults: (options = {}, optionDefaults) ->
+    assertType options, Object
+    for key, defaultValue of optionDefaults
+      if isType defaultValue, Object
+        options[key] = Factory.mergeOptionDefaults options[key], defaultValue
+      else if options[key] is undefined
+        options[key] = defaultValue
+    options
