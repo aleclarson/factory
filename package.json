@@ -2,7 +2,7 @@
   "name": "factory",
   "description": "Instance factories for Javascript",
   "version": "1.0.0",
-  "main": "./js/src/index",
+  "main": "./js/src/Factory",
   "dependencies": {
     "combine": "aleclarson/combine#1.0.0",
     "define": "aleclarson/define#1.0.0",
@@ -12,7 +12,6 @@
     "lotus-log": "aleclarson/lotus-log#1.0.0",
     "lotus-require": "aleclarson/lotus-require#1.0.0",
     "named-function": "aleclarson/named-function#1.0.3",
-    "reaction": "aleclarson/reaction#0.0.1",
     "steal": "aleclarson/steal#0.0.1",
     "sync": "aleclarson/sync#1.0.0",
     "type-utils": "aleclarson/type-utils#1.0.0"

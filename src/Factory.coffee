@@ -2,6 +2,7 @@
 { Void
   Null
   Kind
+  Maybe
   isType
   isKind
   setType
@@ -21,10 +22,11 @@
 
 NamedFunction = require "named-function"
 emptyFunction = require "emptyFunction"
-Reaction = require "reaction"
+Injector = require "injector"
 combine = require "combine"
 define = require "define"
 steal = require "steal"
+guard = require "guard"
 isDev = require "isDev"
 sync = require "sync"
 
@@ -32,6 +34,8 @@ sync = require "sync"
 highestLevel = null
 
 registeredNames = Object.create null
+
+ReactionInjector = Injector "Reaction"
 
 Factory = NamedFunction "Factory", (name, config) ->
 
@@ -42,8 +46,6 @@ Factory = NamedFunction "Factory", (name, config) ->
   sync.each mixins, (mixin) ->
     assertType mixin, Function, { name, mixin, mixins }
     mixin config
-
-  statics = steal config, "statics", {}
 
   initArguments = Factory.initArguments config
 
@@ -73,9 +75,20 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   factory = NamedFunction name, ->
 
-    args = initArguments arguments
-    args[optionsIndex] = Factory.mergeOptionDefaults args[optionsIndex], optionDefaults if optionDefaults?
-    Factory.validateOptionTypes args[optionsIndex], optionTypes, factory if optionTypes?
+    args = [] # The 'arguments' object cannot be leaked!
+    args.push arg for arg in arguments
+
+    args = initArguments args
+
+    if optionDefaults
+      args[optionsIndex] = mergeOptionDefaults args[optionsIndex], optionDefaults
+
+    if isDev
+      guard ->
+        return unless optionTypes and isType args[optionsIndex], Object
+        validateTypes args[optionsIndex], optionTypes
+      .fail (error) ->
+        throwFailure error, { factory }
 
     instance = getFromCache.apply factory, args
     return instance if instance isnt undefined
@@ -86,8 +99,9 @@ Factory = NamedFunction "Factory", (name, config) ->
     unless higherLevel?
       willCreate.call null, highestLevel, args
 
-    try instance = create.apply factory, args
-    catch error then throwFailure error, { method: "create", factory, args }
+    instance = guard -> create.apply factory, args
+    .fail (error) -> throwFailure error, { method: "create", factory, args }
+
     setType instance, factory
 
     if highestLevel?
@@ -98,134 +112,131 @@ Factory = NamedFunction "Factory", (name, config) ->
       assertType instance, factory, { key: "instance.constructor" }
       didCreate.apply instance, args
 
-    prevAutoStart = Reaction.autoStart
-    Reaction.autoStart = yes
-
-    if isDev
-      try
-        initValues instance, args
-        init.apply instance, args
-      catch error
-        throwFailure error, { instance, factory, args }
-
-    else
+    guard ->
+      ReactionInjector.push "autoStart", yes
       initValues instance, args
+      ReactionInjector.pop "autoStart"
       init.apply instance, args
+    .fail (error) ->
+      throwFailure error, { instance, factory, args }
 
     unless higherLevel?
       didInit.apply instance, args
 
-    Reaction.autoStart = prevAutoStart
     return instance
 
   setType factory, Factory
   setKind factory, kind
 
+  statics = Factory.initStatics config,
+    optionTypes: { value: optionTypes }
+    optionDefaults: { value: optionDefaults }
+    Kind: Kind factory
+    Maybe: Maybe factory
+
   initFactory = steal config, "initFactory", emptyFunction
   initFactory.call factory
 
-  define factory.prototype, ->
-    @options = frozen: no
-    @ sync.map config, (value, key) ->
-      return { value, enumerable: key[0] isnt "_" }
+  define factory.prototype, sync.map config, (value, key) ->
+    { value, enumerable: key[0] isnt "_" }
 
   if singleton is yes
     return factory()
 
-  statics.optionTypes = value: optionTypes
-  statics.optionDefaults = value: optionDefaults
-  statics.Kind = lazy: -> Kind factory
+  define factory, { frozen: yes }, statics
 
-  statics = sync.map statics, (value, key) ->
-    enumerable = key[0] isnt "_"
-    if isType value, Object
-      value.frozen ?= yes
-      value.enumerable ?= enumerable
-      return value
-    return {
-      value
-      frozen: yes
-      enumerable
-    }
+  factory
 
-  define factory, statics
+Factory.Kind = Kind Factory
+Factory.Maybe = Maybe Factory
 
 module.exports = setKind Factory, Function
 
-define Factory,
+# Transform built-in types into factories!
+require("./Builtin") Factory
 
-  configTypes: value: {
-    mixins: [ Array, Void ]
-    kind: [ Factory, Null, Void ]
-    getFromCache: [ Function, Void ]
-    create: [ Function, Void ]
-    func: [ Function, Void ]
-    statics: [ Object, Void ]
-    singleton: [ Boolean, Void ]
-    initFactory: [ Function, Void ]
-    initArguments: [ Function, Void ]
-    optionTypes: [ Object, Void ]
-    optionDefaults: [ Object, Void ]
-    optionsIndex: [ Number, Void ]
-    getFromCache: [ Function, Void ]
-    customValues: [ Object, Void ]
-    initValues: [ Function, Void ]
-    initFrozenValues: [ Function, Void ]
-    initReactiveValues: [ Function, Void ]
-    init: [ Function, Void ]
-    willCreate: [ Function, Void ]
-    didCreate: [ Function, Void ]
-    didInit: [ Function, Void ]
-    valueCreators: [ Array, Void ]
-    defineValues: [ Function, Void ]
-    didDefineValues: [ Function, Void ]
-  }
+Factory.configTypes =
+  mixins: Array.Maybe
+  kind: [ Null, Factory.Maybe ]
+  getFromCache: Function.Maybe
+  create: Function.Maybe
+  func: Function.Maybe
+  statics: Object.Maybe
+  singleton: Boolean.Maybe
+  initFactory: Function.Maybe
+  initArguments: Function.Maybe
+  optionTypes: Object.Maybe
+  optionDefaults: Object.Maybe
+  optionsIndex: Number.Maybe
+  getFromCache: Function.Maybe
+  customValues: Object.Maybe
+  initValues: Function.Maybe
+  initFrozenValues: Function.Maybe
+  initReactiveValues: Function.Maybe
+  init: Function.Maybe
+  willCreate: Function.Maybe
+  didCreate: Function.Maybe
+  didInit: Function.Maybe
+  valueCreators: Array.Maybe
+  defineValues: Function.Maybe
+  didDefineValues: Function.Maybe
 
-  valueCreators: value: {
-    boundMethods: BoundMethodCreator()
-    customValues: CustomValueCreator()
-    initFrozenValues: FrozenValueCreator()
-    initValues: WritableValueCreator()
-    initReactiveValues: ReactiveValueCreator()
-  }
+Factory.valueCreators =
+  boundMethods: BoundMethodCreator()
+  customValues: CustomValueCreator()
+  initFrozenValues: FrozenValueCreator()
+  initValues: WritableValueCreator()
+  initReactiveValues: ReactiveValueCreator()
 
-  createInstance: (args...) ->
-    new (Function::bind.apply this, [null].concat args)()
+Factory.createInstance = (args...) ->
+  new (Function::bind.apply this, [null].concat args)()
 
-  getDefaultCreate: (config, kind) ->
-    create = steal config, "create"
-    func = steal config, "func"
-    if create?
-      return create
-    if func?
-      return ->
-        instance = ->
-          func.apply instance, arguments
-    switch kind
-      when Object then -> {}
-      when null then -> Object.create null
-      else -> Factory.createInstance.apply kind, arguments
+Factory.getDefaultCreate = (config, kind) ->
+  create = steal config, "create"
+  func = steal config, "func"
+  if create?
+    return create
+  if func?
+    return ->
+      instance = ->
+        func.apply instance, arguments
+  switch kind
+    when Object then -> {}
+    when null then -> Object.create null
+    else -> Factory.createInstance.apply kind, arguments
 
-  initArguments: (config) ->
-    initArguments = steal config, "initArguments", -> arguments
-    return (args) ->
-      args = initArguments.apply null, args
-      unless isKind(args, Object) and isType(args.length, Number)
-        error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
-        throwFailure error, { prototype, args }
-      sync.map Object.keys(args), (key) -> args[key]
+Factory.initArguments = (config) ->
+  initArguments = steal config, "initArguments", -> arguments
+  return (args) ->
+    args = initArguments.apply null, args
+    unless isKind(args, Object) and isType(args.length, Number)
+      error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
+      throwFailure error, { prototype, args }
+    sync.map Object.keys(args), (key) -> args[key]
 
-  validateOptionTypes: (options, optionTypes, factory) ->
-    return if isDev
-    return unless isType options, Object
-    try validateTypes options, optionTypes
-    catch error then throwFailure error, { factory }
+Factory.initStatics = (config, defaultValues) ->
 
-  mergeOptionDefaults: (options = {}, optionDefaults) ->
-    assertType options, Object
-    for key, defaultValue of optionDefaults
-      if isType defaultValue, Object
-        options[key] = Factory.mergeOptionDefaults options[key], defaultValue
-      else if options[key] is undefined
-        options[key] = defaultValue
-    options
+  statics = steal config, "statics", {}
+
+  sync.each defaultValues, (value, key) ->
+    statics[key] = value
+
+  sync.map statics, (value, key) ->
+    enumerable = key[0] isnt "_"
+    if isType value, Object
+      value.enumerable ?= enumerable
+      return value
+    { value, enumerable }
+
+#
+# Helpers
+#
+
+mergeOptionDefaults = (options = {}, optionDefaults) ->
+  assertType options, Object
+  for key, defaultValue of optionDefaults
+    if isType defaultValue, Object
+      options[key] = mergeOptionDefaults options[key], defaultValue
+    else if options[key] is undefined
+      options[key] = defaultValue
+  options
