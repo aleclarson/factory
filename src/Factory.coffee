@@ -37,6 +37,7 @@ registeredNames = Object.create null
 
 ReactionInjector = Injector "Reaction"
 
+module.exports =
 Factory = NamedFunction "Factory", (name, config) ->
 
   assertType name, String, "name"
@@ -73,7 +74,7 @@ Factory = NamedFunction "Factory", (name, config) ->
   registeredNames[name] = yes
   instanceCount = 0
 
-  factory = NamedFunction name, ->
+  factory = ->
 
     args = [] # The 'arguments' object cannot be leaked!
     args.push arg for arg in arguments
@@ -81,7 +82,7 @@ Factory = NamedFunction "Factory", (name, config) ->
     args = initArguments args
 
     if optionDefaults
-      args[optionsIndex] = mergeOptionDefaults args[optionsIndex], optionDefaults
+      args[optionsIndex] = Factory.mergeOptionDefaults args[optionsIndex], optionDefaults
 
     if isDev
       guard ->
@@ -125,6 +126,8 @@ Factory = NamedFunction "Factory", (name, config) ->
 
     return instance
 
+  factory.getName = -> name
+
   setType factory, Factory
   setKind factory, kind
 
@@ -147,96 +150,96 @@ Factory = NamedFunction "Factory", (name, config) ->
 
   factory
 
-Factory.Kind = Kind Factory
-Factory.Maybe = Maybe Factory
-
-module.exports = setKind Factory, Function
+setKind Factory, Function
 
 # Transform built-in types into factories!
 require("./Builtin") Factory
 
-Factory.configTypes =
-  mixins: Array.Maybe
-  kind: [ Null, Factory.Maybe ]
-  getFromCache: Function.Maybe
-  create: Function.Maybe
-  func: Function.Maybe
-  statics: Object.Maybe
-  singleton: Boolean.Maybe
-  initFactory: Function.Maybe
-  initArguments: Function.Maybe
-  optionTypes: Object.Maybe
-  optionDefaults: Object.Maybe
-  optionsIndex: Number.Maybe
-  getFromCache: Function.Maybe
-  customValues: Object.Maybe
-  initValues: Function.Maybe
-  initFrozenValues: Function.Maybe
-  initReactiveValues: Function.Maybe
-  init: Function.Maybe
-  willCreate: Function.Maybe
-  didCreate: Function.Maybe
-  didInit: Function.Maybe
-  valueCreators: Array.Maybe
-  defineValues: Function.Maybe
-  didDefineValues: Function.Maybe
+# Override `Function::name`!
+define Factory.prototype, "name",
+  configurable: no
+  get: -> @getName()
 
-Factory.valueCreators =
-  boundMethods: BoundMethodCreator()
-  customValues: CustomValueCreator()
-  initFrozenValues: FrozenValueCreator()
-  initValues: WritableValueCreator()
-  initReactiveValues: ReactiveValueCreator()
+define Factory,
 
-Factory.createInstance = (args...) ->
-  new (Function::bind.apply this, [null].concat args)()
+  Kind: Kind Factory
 
-Factory.getDefaultCreate = (config, kind) ->
-  create = steal config, "create"
-  func = steal config, "func"
-  if create?
-    return create
-  if func?
-    return ->
-      instance = ->
-        func.apply instance, arguments
-  switch kind
-    when Object then -> {}
-    when null then -> Object.create null
-    else -> Factory.createInstance.apply kind, arguments
+  Maybe: Maybe Factory
 
-Factory.initArguments = (config) ->
-  initArguments = steal config, "initArguments", -> arguments
-  return (args) ->
-    args = initArguments.apply null, args
-    unless isKind(args, Object) and isType(args.length, Number)
-      error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
-      throwFailure error, { prototype, args }
-    sync.map Object.keys(args), (key) -> args[key]
+  configTypes: value:
+    mixins: Array.Maybe
+    kind: [ Factory, Function, Null, Void ]
+    getFromCache: Function.Maybe
+    create: Function.Maybe
+    func: Function.Maybe
+    statics: Object.Maybe
+    singleton: Boolean.Maybe
+    initFactory: Function.Maybe
+    initArguments: Function.Maybe
+    optionTypes: Object.Maybe
+    optionDefaults: Object.Maybe
+    optionsIndex: Number.Maybe
+    getFromCache: Function.Maybe
+    customValues: Object.Maybe
+    initValues: Function.Maybe
+    initFrozenValues: Function.Maybe
+    initReactiveValues: Function.Maybe
+    init: Function.Maybe
+    willCreate: Function.Maybe
+    didCreate: Function.Maybe
+    didInit: Function.Maybe
+    valueCreators: Array.Maybe
+    defineValues: Function.Maybe
+    didDefineValues: Function.Maybe
 
-Factory.initStatics = (config, defaultValues) ->
+  valueCreators: value:
+    boundMethods: BoundMethodCreator()
+    customValues: CustomValueCreator()
+    initFrozenValues: FrozenValueCreator()
+    initValues: WritableValueCreator()
+    initReactiveValues: ReactiveValueCreator()
 
-  statics = steal config, "statics", {}
+  getDefaultCreate: (config, kind) ->
+    create = steal config, "create"
+    func = steal config, "func"
+    if create then create
+    else if func then -> self = -> func.apply self, arguments
+    else if kind is Object then -> {}
+    else if kind is Array then -> []
+    else if kind is null then -> Object.create null
+    else ->
+      args = [ null ]
+      args.push arg for arg in arguments
+      new (Function::bind.apply kind, args)()
 
-  sync.each defaultValues, (value, key) ->
-    statics[key] = value
+  initArguments: (config) ->
+    initArguments = steal config, "initArguments", -> arguments
+    return (args) ->
+      args = initArguments.apply null, args
+      unless isKind(args, Object) and isType(args.length, Number)
+        error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
+        throwFailure error, { prototype, args }
+      sync.map Object.keys(args), (key) -> args[key]
 
-  sync.map statics, (value, key) ->
-    enumerable = key[0] isnt "_"
-    if isType value, Object
-      value.enumerable ?= enumerable
-      return value
-    { value, enumerable }
+  initStatics: (config, defaultValues) ->
 
-#
-# Helpers
-#
+    statics = steal config, "statics", {}
 
-mergeOptionDefaults = (options = {}, optionDefaults) ->
-  assertType options, Object
-  for key, defaultValue of optionDefaults
-    if isType defaultValue, Object
-      options[key] = mergeOptionDefaults options[key], defaultValue
-    else if options[key] is undefined
-      options[key] = defaultValue
-  options
+    sync.each defaultValues, (value, key) ->
+      statics[key] = value
+
+    sync.map statics, (value, key) ->
+      enumerable = key[0] isnt "_"
+      if isType value, Object
+        value.enumerable ?= enumerable
+        return value
+      { value, enumerable }
+
+  mergeOptionDefaults: (options = {}, optionDefaults) ->
+    assertType options, Object
+    for key, defaultValue of optionDefaults
+      if isType defaultValue, Object
+        options[key] = Factory.mergeOptionDefaults options[key], defaultValue
+      else if options[key] is undefined
+        options[key] = defaultValue
+    options
