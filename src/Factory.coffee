@@ -20,7 +20,7 @@
 
 { throwFailure } = require "failure"
 
-NamedFunction = require "named-function"
+NamedFunction = require "NamedFunction"
 emptyFunction = require "emptyFunction"
 Injector = require "injector"
 combine = require "combine"
@@ -74,7 +74,7 @@ Factory = NamedFunction "Factory", (name, config) ->
   registeredNames[name] = yes
   instanceCount = 0
 
-  factory = ->
+  factory = NamedFunction name, ->
 
     args = [] # The 'arguments' object cannot be leaked!
     args.push arg for arg in arguments
@@ -126,8 +126,6 @@ Factory = NamedFunction "Factory", (name, config) ->
 
     return instance
 
-  factory.getName = -> name
-
   setType factory, Factory
   setKind factory, kind
 
@@ -154,11 +152,6 @@ setKind Factory, Function
 
 # Transform built-in types into factories!
 require("./Builtin") Factory
-
-# Override `Function::name`!
-define Factory.prototype, "name",
-  configurable: no
-  get: -> @getName()
 
 define Factory,
 

@@ -6,7 +6,7 @@ ref1 = require("ValueDefiner"), ValueDefiner = ref1.ValueDefiner, BoundMethodCre
 
 throwFailure = require("failure").throwFailure;
 
-NamedFunction = require("named-function");
+NamedFunction = require("NamedFunction");
 
 emptyFunction = require("emptyFunction");
 
@@ -66,7 +66,7 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
   });
   registeredNames[name] = true;
   instanceCount = 0;
-  factory = function() {
+  factory = NamedFunction(name, function() {
     var arg, args, higherLevel, i, instance, len;
     args = [];
     for (i = 0, len = arguments.length; i < len; i++) {
@@ -140,10 +140,7 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
       didInit.apply(instance, args);
     }
     return instance;
-  };
-  factory.getName = function() {
-    return name;
-  };
+  });
   setType(factory, Factory);
   setKind(factory, kind);
   statics = Factory.initStatics(config, {
@@ -176,13 +173,6 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
 setKind(Factory, Function);
 
 require("./Builtin")(Factory);
-
-define(Factory.prototype, "name", {
-  configurable: false,
-  get: function() {
-    return this.getName();
-  }
-});
 
 define(Factory, {
   Kind: Kind(Factory),
