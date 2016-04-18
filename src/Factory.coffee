@@ -1,4 +1,6 @@
 
+require "isDev"
+
 { Void
   Null
   Kind
@@ -22,12 +24,12 @@
 
 NamedFunction = require "NamedFunction"
 emptyFunction = require "emptyFunction"
+mergeDefaults = require "mergeDefaults"
 Injector = require "injector"
 combine = require "combine"
 define = require "define"
 steal = require "steal"
 guard = require "guard"
-isDev = require "isDev"
 sync = require "sync"
 
 # The `__id` of the highest level factory in the creation chain.
@@ -82,14 +84,12 @@ Factory = NamedFunction "Factory", (name, config) ->
     args = initArguments args
 
     if optionDefaults
-      args[optionsIndex] = Factory.mergeOptionDefaults args[optionsIndex], optionDefaults
+      args[optionsIndex] ?= {}
+      mergeDefaults args[optionsIndex], optionDefaults
 
-    if isDev
-      guard ->
-        return unless optionTypes and isType args[optionsIndex], Object
-        validateTypes args[optionsIndex], optionTypes
-      .fail (error) ->
-        throwFailure error, { factory }
+    if isDev and optionTypes and isType args[optionsIndex], Object
+      guard -> validateTypes args[optionsIndex], optionTypes
+      .fail (error) -> throwFailure error, { factory }
 
     instance = getFromCache.apply factory, args
     return instance if instance isnt undefined
@@ -144,7 +144,7 @@ Factory = NamedFunction "Factory", (name, config) ->
   if singleton is yes
     return factory()
 
-  define factory, { frozen: yes }, statics
+  define factory, statics
 
   factory
 
@@ -210,8 +210,8 @@ define Factory,
     return (args) ->
       args = initArguments.apply null, args
       unless isKind(args, Object) and isType(args.length, Number)
-        error = TypeError "'#{prototype.constructor.name}.initArguments' must return an Array-like object"
-        throwFailure error, { prototype, args }
+        error = TypeError "'initArguments' must return an Array-like object"
+        throwFailure error, { args }
       sync.map Object.keys(args), (key) -> args[key]
 
   initStatics: (config, defaultValues) ->
@@ -227,12 +227,3 @@ define Factory,
         value.enumerable ?= enumerable
         return value
       { value, enumerable }
-
-  mergeOptionDefaults: (options = {}, optionDefaults) ->
-    assertType options, Object
-    for key, defaultValue of optionDefaults
-      if isType defaultValue, Object
-        options[key] = Factory.mergeOptionDefaults options[key], defaultValue
-      else if options[key] is undefined
-        options[key] = defaultValue
-    options

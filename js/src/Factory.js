@@ -1,4 +1,6 @@
-var BoundMethodCreator, CustomValueCreator, Factory, FrozenValueCreator, Injector, Kind, Maybe, NamedFunction, Null, ReactionInjector, ReactiveValueCreator, ValueDefiner, Void, WritableValueCreator, assert, assertType, combine, define, emptyFunction, guard, highestLevel, isDev, isKind, isType, ref, ref1, registeredNames, setKind, setType, steal, sync, throwFailure, validateTypes;
+var BoundMethodCreator, CustomValueCreator, Factory, FrozenValueCreator, Injector, Kind, Maybe, NamedFunction, Null, ReactionInjector, ReactiveValueCreator, ValueDefiner, Void, WritableValueCreator, assert, assertType, combine, define, emptyFunction, guard, highestLevel, isKind, isType, mergeDefaults, ref, ref1, registeredNames, setKind, setType, steal, sync, throwFailure, validateTypes;
+
+require("isDev");
 
 ref = require("type-utils"), Void = ref.Void, Null = ref.Null, Kind = ref.Kind, Maybe = ref.Maybe, isType = ref.isType, isKind = ref.isKind, setType = ref.setType, setKind = ref.setKind, assert = ref.assert, assertType = ref.assertType, validateTypes = ref.validateTypes;
 
@@ -10,6 +12,8 @@ NamedFunction = require("NamedFunction");
 
 emptyFunction = require("emptyFunction");
 
+mergeDefaults = require("mergeDefaults");
+
 Injector = require("injector");
 
 combine = require("combine");
@@ -19,8 +23,6 @@ define = require("define");
 steal = require("steal");
 
 guard = require("guard");
-
-isDev = require("isDev");
 
 sync = require("sync");
 
@@ -75,13 +77,13 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
     }
     args = initArguments(args);
     if (optionDefaults) {
-      args[optionsIndex] = Factory.mergeOptionDefaults(args[optionsIndex], optionDefaults);
+      if (args[optionsIndex] == null) {
+        args[optionsIndex] = {};
+      }
+      mergeDefaults(args[optionsIndex], optionDefaults);
     }
-    if (isDev) {
+    if (isDev && optionTypes && isType(args[optionsIndex], Object)) {
       guard(function() {
-        if (!(optionTypes && isType(args[optionsIndex], Object))) {
-          return;
-        }
         return validateTypes(args[optionsIndex], optionTypes);
       }).fail(function(error) {
         return throwFailure(error, {
@@ -164,9 +166,7 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
   if (singleton === true) {
     return factory();
   }
-  define(factory, {
-    frozen: true
-  }, statics);
+  define(factory, statics);
   return factory;
 });
 
@@ -260,9 +260,8 @@ define(Factory, {
       var error;
       args = initArguments.apply(null, args);
       if (!(isKind(args, Object) && isType(args.length, Number))) {
-        error = TypeError("'" + prototype.constructor.name + ".initArguments' must return an Array-like object");
+        error = TypeError("'initArguments' must return an Array-like object");
         throwFailure(error, {
-          prototype: prototype,
           args: args
         });
       }
@@ -291,22 +290,6 @@ define(Factory, {
         enumerable: enumerable
       };
     });
-  },
-  mergeOptionDefaults: function(options, optionDefaults) {
-    var defaultValue, key;
-    if (options == null) {
-      options = {};
-    }
-    assertType(options, Object);
-    for (key in optionDefaults) {
-      defaultValue = optionDefaults[key];
-      if (isType(defaultValue, Object)) {
-        options[key] = Factory.mergeOptionDefaults(options[key], defaultValue);
-      } else if (options[key] === void 0) {
-        options[key] = defaultValue;
-      }
-    }
-    return options;
   }
 });
 

@@ -1,5 +1,5 @@
 
-# factory v1.0.0 [![stable](http://badges.github.io/stability-badges/dist/stable.svg)](http://github.com/badges/stability-badges)
+# factory v1.0.0 ![experimental](https://img.shields.io/badge/stability-experimental-EC5315.svg?style=flat)
 
 The `Factory` constructor is used to define classes.
 
@@ -40,57 +40,3 @@ The following options are useful for mixins and debugging:
 - `didInit: [ Function, Void ]` - Called right before a top-level instance is returned by the constructor. [Learn more.]()
 - `defineValues: [ Function, Void ]` - Replace how values are defined as properties on each instance. [Learn more.]()
 - `didDefineValues: [ Function, Void ]` - Inspect the values that were just defined on each instance. [Learn more.]()
-
-## FAQ
-
-#### How do I inherit from another class?
-
-*Not yet answered!*
-
-#### How do I construct the base object manually?
-
-*Not yet answered!*
-
-#### How do I prevent duplicate instances?
-
-*Not yet answered!*
-
-#### How do I add values to the prototype?
-
-*Not yet answered!*
-
-#### How do I add values to the factory?
-
-*Not yet answered!*
-
-#### How do I add a value that cannot be changed?
-
-*Not yet answered!*
-
-#### How do I add a value that can be changed?
-
-*Not yet answered!*
-
-#### How do I add a value that is reactive?
-
-*Not yet answered!*
-
-#### How do I add a value using a custom getter and/or setter?
-
-*Not yet answered!*
-
-#### How do I add a value that is lazily evaluated?
-
-*Not yet answered!*
-
-#### How do I access the factory before it's returned?
-
-*Not yet answered!*
-
-#### How do I use mixins?
-
-*Not yet answered!*
-
-#### How do I make my own mixins?
-
-*Not yet answered!*
