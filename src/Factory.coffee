@@ -138,8 +138,7 @@ Factory = NamedFunction "Factory", (name, config) ->
   initFactory = steal config, "initFactory", emptyFunction
   initFactory.call factory
 
-  define factory.prototype, sync.map config, (value, key) ->
-    { value, enumerable: key[0] isnt "_" }
+  define factory.prototype, config
 
   if singleton is yes
     return factory()
@@ -161,7 +160,7 @@ define Factory,
 
   configTypes: value:
     mixins: Array.Maybe
-    kind: [ Factory, Function, Null, Void ]
+    kind: [ Kind(Function), Null, Void ]
     getFromCache: Function.Maybe
     create: Function.Maybe
     func: Function.Maybe

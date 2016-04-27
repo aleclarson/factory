@@ -157,12 +157,7 @@ module.exports = Factory = NamedFunction("Factory", function(name, config) {
   });
   initFactory = steal(config, "initFactory", emptyFunction);
   initFactory.call(factory);
-  define(factory.prototype, sync.map(config, function(value, key) {
-    return {
-      value: value,
-      enumerable: key[0] !== "_"
-    };
-  }));
+  define(factory.prototype, config);
   if (singleton === true) {
     return factory();
   }
@@ -180,7 +175,7 @@ define(Factory, {
   configTypes: {
     value: {
       mixins: Array.Maybe,
-      kind: [Factory, Function, Null, Void],
+      kind: [Kind(Function), Null, Void],
       getFromCache: Function.Maybe,
       create: Function.Maybe,
       func: Function.Maybe,
